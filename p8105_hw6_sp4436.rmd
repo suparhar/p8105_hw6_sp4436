@@ -9,13 +9,14 @@ output: github_document
 library(tidyverse)
 library(readxl)
 library(haven)
-library(readr)
+library(readr) 
 library(p8105.datasets)
 library(ggridges)
 library(dplyr)
 library(janitor)
 library(patchwork)
 library(broom)
+library(modelr)
 
 ```
 
@@ -37,7 +38,6 @@ homicide_df =
     case_status = ifelse(disposition == "Closed by arrest", 1, 0)
   ) |>
   filter(!is.na(victim_age))
-
 ```
 
 ```{r Baltimore GLM}
@@ -107,14 +107,13 @@ city_or_results |>
     y = "City"
   ) +
   theme_minimal()
-
 ```
 
 This plot shows substantial variation across cities in the adjusted odds of solving homicides involving male victims compared to female victims after controlling for victim age and race. Several cities (Albuquerque, NM; Stockton, CA; and Fresno, CA) have the highest estimated odds ratios, suggesting that male-victim homicides are more likely to be solved than female-victim homicides. However, these estimates have very wide confidence intervals that include the null value of 1, meaning there is no statistically significant evidence of a difference in solve probability in these cities.
 
-At the lower end, cities such as New York, NY; Baton Rouge, LA; and Omaha, NE show the lowest odds ratios, indicating that homicides involving male victims are less likely to be solved than those involving female victims. In these cities, the confidence intervals lie entirely below 1, providing statistically significant evidence for lower solve rates among male-victim cases. Although these cities appear to have the smallest ORs, their intervals overlap, so we cannot definitively conclude which city has the “lowest” odds ratio.
+At the lower end, cities such as New York, NY; Baton Rouge, LA; and Omaha, NE show the lowest odds ratios, indicating that homicides involving male victims are less likely to be solved than those involving female victims. In these cities, the confidence intervals lie below 1, providing statistically significant evidence for lower solve rates among male-victim cases. The CIs for these cities overlap so wecannot see which city has the lowest OR.
 
-Overall, the plot illustrates that while many cities show lower solve rates for male victims, the precision of the estimates varies widely, and statistical significance is primarily seen among cities with larger sample sizes and narrower confidence intervals.
+The plot shows that many cities show lower solve rates for male victims, the precision varies widely, and statistical significance is mainly seen among cities with larger sample sizes and narrower confidence intervals.
 
 ## Problem 2
 
@@ -171,4 +170,142 @@ ci_results =
 knitr::kable(ci_results, digits = 4)
 ```
 
+## Problem 3
 
+```{r Load in the Data and Clean}
+bw_df = read_csv("birthweight.csv") |> 
+  janitor::clean_names() |> 
+  mutate(
+    babysex = factor(babysex, levels = c(1, 2),
+                     labels = c("Male", "Female")),
+    
+    frace = factor(frace, 
+                   levels = c(1, 2, 3, 4, 8, 9),
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other", "Unknown")),
+    
+    mrace = factor(mrace,
+                   levels = c(1, 2, 3, 4, 8),
+                   labels = c("White", "Black", "Asian", "Puerto Rican", "Other")),
+    
+    malform = factor(malform, 
+                     levels = c(0, 1),
+                     labels = c("Absent", "Present"))
+  )
+summary(is.na(bw_df))
+```
+
+The following model focuses on maternal risk factors and pregnancy characteristics that are associated with infant birthweight. The following predictors are hypothesized to drive birthweight:
+
+Gestational age (gaweeks)
+
+Maternal age at delivery (momage)
+
+Pre-pregnancy BMI (ppbmi)
+
+Weight gain during pregnancy (wtgain)
+
+Smoking during pregnancy (smoken)
+
+Maternal race (mrace)
+
+Family income (fincome)
+
+Several available variables were evaluated for inclusion but excluded. Variables such as pnumlbw (previous low birthweight babies) and parity showed extremely limited variability in the dataset. They provided no additional explanatory power. Infant physical measurements (blength, bhead) were not included because they capture fetal growth outputs rather than maternal predictors.
+
+```{r Model and Plot for BW}
+bw_mod_main =
+  lm(
+    bwt ~ gaweeks + momage + ppbmi + wtgain + smoken + mrace + fincome,
+    data = bw_df
+  )
+
+summary(bw_mod_main)
+
+bw_df |> 
+  add_predictions(bw_mod_main) |> 
+  add_residuals(bw_mod_main) |> 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(
+    title = "Residuals vs Fitted Values (Model 1)",
+    x = "Fitted Values (Predicted Birthweight)",
+    y = "Residuals"
+  ) +
+  theme_minimal()
+```
+
+```{r Fit Comparison Models for BW}
+bw_mod_simple =
+  lm(bwt ~ blength + gaweeks, data = bw_df)
+
+bw_mod_interaction =
+  lm(bwt ~ bhead * blength * gaweeks, data = bw_df)
+```
+
+```{r RMSE and Plot}
+set.seed(1)
+
+#Generate CV splits and convert to tibbles
+cv_df =
+  crossv_mc(bw_df, n = 100) |>
+  mutate(
+    train = map(train, as_tibble),
+    test  = map(test,  as_tibble)
+  )
+
+#Fit all three models on each training fold
+cv_df =
+  cv_df |>
+  mutate(
+    mod_main   = map(train, \(df) lm(bwt ~ gaweeks + momage + ppbmi + wtgain + smoken + mrace + fincome, data = df)),
+    mod_simple = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+    mod_inter  = map(train, \(df) lm(bwt ~ bhead * blength * gaweeks, data = df))
+  )
+
+#Compute RMSE
+cv_df =
+  cv_df |>
+  mutate(
+    rmse_main   = map2_dbl(mod_main,   test, modelr::rmse),
+    rmse_simple = map2_dbl(mod_simple, test, modelr::rmse),
+    rmse_inter  = map2_dbl(mod_inter,  test, modelr::rmse)
+  )
+
+#Pivot into long format for plotting
+cv_long =
+  cv_df |>
+  select(starts_with("rmse")) |>
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) |>
+  mutate(
+    model = fct_inorder(recode(model,
+                               main   = "Main model",
+                               simple = "Length + GA",
+                               inter  = "3-way interaction"))
+  )
+
+#Violin plot 
+cv_long |>
+  ggplot(aes(x = model, y = rmse, fill = model)) +
+  geom_violin(alpha = 0.7, color = "black") +
+  scale_fill_viridis_d() +
+  labs(
+    title = "Model Comparison via Cross-Validation",
+    x = "Model",
+    y = "Root Mean Squared Error (RMSE)"
+  ) +
+  theme_minimal()
+```
+
+The cross-validated RMSE plot shows clear differences in predictive performance across the three models. The maternal-factor model (My Model) has the highest RMSE values and the largest spread. This means that it performs the worst in terms of predicting birthweight.
+
+The Length + Gestational Age model (Model 2) performs better, with lower RMSE values. Birth length and gestational age are direct markers of fetal growth, so they provide much stronger predictive information than maternal factors alone.
+
+The full interaction model (Model 3), which incorporates head circumference, length, sex, and all lower-order interactions, achieves the lowest RMSE overall.
+
+Overall, the my model is not optimal for prediction. The other two models are have better predictive accuracy mainly the model including the interaction term.
