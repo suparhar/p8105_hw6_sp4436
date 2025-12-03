@@ -1,0 +1,117 @@
+---
+title: "p8105_hw6_sp4436"
+author: "Sukhman Parhar"
+date: "2025-12-03"
+output: github_document
+---
+
+```{r Load Packages}
+library(tidyverse)
+library(readxl)
+library(haven)
+library(readr)
+library(p8105.datasets)
+library(ggridges)
+library(dplyr)
+library(janitor)
+library(patchwork)
+library(broom)
+
+```
+
+## Problem 1
+
+```{r Load in the data}
+homicide_df =
+  read_csv("https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv") |> 
+  janitor::clean_names() |>
+  mutate(
+    city_state = str_c(city, ", ", state)
+  ) |>
+  filter(
+    !city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"),
+    victim_race %in% c("White", "Black")
+  ) |>
+  mutate(
+    victim_age = as.numeric(victim_age),
+    case_status = ifelse(disposition == "Closed by arrest", 1, 0)
+  ) |>
+  filter(!is.na(victim_age))
+
+```
+
+```{r Baltimore GLM}
+baltimore_results =
+  homicide_df |> 
+  filter(city_state == "Baltimore, MD") |> 
+  glm(
+    case_status ~ victim_age + victim_sex + victim_race,
+    family = binomial(),
+    data = _
+  ) |> 
+  broom::tidy(conf.int = TRUE) |> 
+  mutate(
+    OR = exp(estimate),
+    OR_CI_lower = exp(conf.low),
+    OR_CI_upper = exp(conf.high)
+  ) |>
+  filter(term == "victim_sexMale") |> 
+  select(term, log_OR = estimate, OR, p.value, OR_CI_lower, OR_CI_upper)
+
+baltimore_results |> knitr::kable(digits = 3)
+```
+
+The adjusted odds ratio for solving homicides comparing male victims to female victims in Baltimore is 0.426 (95% CI: 0.324, 0.558), controlling for victim age and race.
+
+Because the confidence interval does not include 1, this association is statistically significant. This OR indicates that homicides involving male victims have approximately 57% lower odds of being solved than homicides involving female victims, after accounting for age and race. A range of reasonable estimates for the true odds ratio comparing the probability of solving homicides involving male victims versus female victims, consistent with our data and model assumptions, is between 0.324 and 0.558.
+
+```{r All City OR and CI}
+city_or_results =
+  homicide_df |> 
+  nest(data = -city_state) |> 
+  mutate(
+    fit = map(
+      data,
+      ~ glm(case_status ~ victim_age + victim_sex + victim_race,
+            family = binomial(), data = .x)
+    ),
+    tidy_fit = map(fit, ~ broom::tidy(.x, conf.int = TRUE))
+  ) |>
+  unnest(tidy_fit) |>
+  filter(term == "victim_sexMale") |>
+  mutate(
+    OR = exp(estimate),
+    OR_CI_lower = exp(conf.low),
+    OR_CI_upper = exp(conf.high)
+  ) |>
+  select(city_state, OR, OR_CI_lower, OR_CI_upper)
+
+city_or_results |> 
+  knitr::kable(digits = 3)
+
+```
+
+```{r All City OR Plot}
+## Plot of city-specific ORs and 95% CIs (Male vs Female victims)
+
+city_or_results |>
+  arrange(OR) |>
+  mutate(city_state = factor(city_state, levels = city_state)) |>
+  ggplot(aes(x = OR, y = city_state)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = OR_CI_lower, xmax = OR_CI_upper), height = 0.15) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
+  labs(
+    title = "Adjusted Odds of Solving Homicides: Male vs Female Victims",
+    x = "Odds ratio (Male vs Female victims)",
+    y = "City"
+  ) +
+  theme_minimal()
+
+```
+
+This plot shows substantial variation across cities in the adjusted odds of solving homicides involving male victims compared to female victims after controlling for victim age and race. Several cities (Albuquerque, NM; Stockton, CA; and Fresno, CA) have the highest estimated odds ratios, suggesting that male-victim homicides are more likely to be solved than female-victim homicides. However, these estimates have very wide confidence intervals that include the null value of 1, meaning there is no statistically significant evidence of a difference in solve probability in these cities.
+
+At the lower end, cities such as New York, NY; Baton Rouge, LA; and Omaha, NE show the lowest odds ratios, indicating that homicides involving male victims are less likely to be solved than those involving female victims. In these cities, the confidence intervals lie entirely below 1, providing statistically significant evidence for lower solve rates among male-victim cases. Although these cities appear to have the smallest ORs, their intervals overlap, so we cannot definitively conclude which city has the “lowest” odds ratio.
+
+Overall, the plot illustrates that while many cities show lower solve rates for male victims, the precision of the estimates varies widely, and statistical significance is primarily seen among cities with larger sample sizes and narrower confidence intervals.
