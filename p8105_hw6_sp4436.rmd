@@ -5,7 +5,7 @@ date: "2025-12-03"
 output: github_document
 ---
 
-```{r Load Packages}
+```{r Load Packages, message = FALSE, warning = FALSE}
 library(tidyverse)
 library(readxl)
 library(haven)
@@ -118,6 +118,57 @@ Overall, the plot illustrates that while many cities show lower solve rates for 
 
 ## Problem 2
 
+```{r Import Data}
+set.seed(1)
+data("weather_df")
 
-## Problem 3
+bootstrap_results =
+  weather_df |>
+  modelr::bootstrap(n = 5000) |>
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)),
+    results_glance = map(models, broom::glance),
+    results_tidy = map(models, broom::tidy)
+  ) |>
+  select(-strap, -models) |>
+  unnest(results_glance) |>
+  select(.id, r.squared, results_tidy) |>
+  unnest(results_tidy) |>
+  select(.id, r.squared, term, estimate) |>
+  pivot_wider(
+    names_from = term,
+    values_from = estimate
+  ) |>
+  mutate(
+    beta_ratio = tmin / prcp   # β̂₁ / β̂₂
+  )
+```
+
+```{r Plots}
+p1 = bootstrap_results |>
+  ggplot(aes(x = r.squared)) +
+  geom_density(fill = "blue", alpha = 0.5) +
+  labs(title = "Bootstrap Distribution of R²", x = "R²")
+
+p2 = bootstrap_results |>
+  ggplot(aes(x = beta_ratio)) +
+  geom_density(fill = "red", alpha = 0.5) +
+  labs(title = "Distribution of β₁ / β₂", x = "Coefficient Ratio")
+
+p1 + p2
+```
+
+```{r CI Results}
+ci_results =
+  bootstrap_results |>
+  summarize(
+    r_squared_low = quantile(r.squared, 0.025),
+    r_squared_high = quantile(r.squared, 0.975),
+    beta_ratio_low = quantile(beta_ratio, 0.025),
+    beta_ratio_high = quantile(beta_ratio, 0.975)
+  )
+
+knitr::kable(ci_results, digits = 4)
+```
+
 
