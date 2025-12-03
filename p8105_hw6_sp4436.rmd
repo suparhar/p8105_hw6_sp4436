@@ -99,7 +99,7 @@ city_or_results |>
   mutate(city_state = factor(city_state, levels = city_state)) |>
   ggplot(aes(x = OR, y = city_state)) +
   geom_point() +
-  geom_errorbarh(aes(xmin = OR_CI_lower, xmax = OR_CI_upper), height = 0.15) +
+  geom_errorbarh(aes(xmin = OR_CI_lower, xmax = OR_CI_upper), width = 0.15) +
   geom_vline(xintercept = 1, linetype = "dashed", color = "red") +
   labs(
     title = "Adjusted Odds of Solving Homicides: Male vs Female Victims",
@@ -115,3 +115,9 @@ This plot shows substantial variation across cities in the adjusted odds of solv
 At the lower end, cities such as New York, NY; Baton Rouge, LA; and Omaha, NE show the lowest odds ratios, indicating that homicides involving male victims are less likely to be solved than those involving female victims. In these cities, the confidence intervals lie entirely below 1, providing statistically significant evidence for lower solve rates among male-victim cases. Although these cities appear to have the smallest ORs, their intervals overlap, so we cannot definitively conclude which city has the “lowest” odds ratio.
 
 Overall, the plot illustrates that while many cities show lower solve rates for male victims, the precision of the estimates varies widely, and statistical significance is primarily seen among cities with larger sample sizes and narrower confidence intervals.
+
+## Problem 2
+
+
+## Problem 3
+
